@@ -1,7 +1,7 @@
 import telebot
 import os
 from dotenv import load_dotenv
-from ali_api import obtener_detalles_producto # Importamos tu nuevo lector
+from ali_api import obtener_detalles_producto
 
 load_dotenv()
 
@@ -9,35 +9,37 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 ID_CANAL = '@RadarPromoMX_Oficial'
 
-def publicar_automaticamente(url_aliexpress):
-    # 1. Extraer el ID del producto del link
-    # Ejemplo: .../item/12345.html -> 12345
+def publicar_oferta(url_aliexpress):
     try:
+        # Extraer ID del link (ej: 10050012345)
         product_id = url_aliexpress.split("/item/")[1].split(".html")[0]
-    except:
-        print("❌ URL no válida")
-        return
-
-    # 2. Obtener datos reales de la API
-    datos = obtener_detalles_producto(product_id)
-    
-    if datos:
-        descuento = int(100 - (float(datos['precio_promo']) * 100 / float(datos['precio_original'])))
+        print(f"🔎 Analizando producto ID: {product_id}")
         
-        mensaje = (
-            f"🔥 <b>{datos['titulo'].upper()}</b>\n\n"
-            f"💰 <b>Precio Especial:</b> ${datos['precio_promo']} MXN\n"
-            f"❌ <b>Antes:</b> <s>${datos['precio_original']} MXN</s> ({descuento}% OFF)\n\n"
-            f"🕵️ <i>Curaduría técnica por RadarPromo-MX</i>\n\n"
-            f"🛒 <a href='{url_aliexpress}'>¡VER OFERTA AQUÍ!</a>"
-        )
+        datos = obtener_detalles_producto(product_id)
         
-        bot.send_photo(ID_CANAL, datos['foto'], caption=mensaje, parse_mode='HTML')
-        print(f"✅ ¡Oferta de {product_id} publicada automáticamente!")
-    else:
-        print("⚠️ No se pudo obtener info de la API.")
+        if datos:
+            # Calcular descuento
+            p_promo = float(datos['precio_promo'])
+            p_orig = float(datos['precio_original'])
+            desc = int(100 - (p_promo * 100 / p_orig)) if p_orig > 0 else 0
+            
+            mensaje = (
+                f"🔥 <b>{datos['titulo'][:100]}...</b>\n\n"
+                f"💰 <b>Precio:</b> ${p_promo} MXN\n"
+                f"❌ <b>Antes:</b> <s>${p_orig} MXN</s> ({desc}% OFF)\n\n"
+                f"🕵️ <i>Curaduría técnica por @RadarPromoMX</i>\n\n"
+                f"🛒 <a href='{url_aliexpress}'>¡VER OFERTA AQUÍ!</a>"
+            )
+            
+            bot.send_photo(ID_CANAL, datos['foto'], caption=mensaje, parse_mode='HTML')
+            print("✅ Publicación exitosa en Telegram")
+        else:
+            print("⚠️ AliExpress aún no devuelve datos. Posible activación pendiente.")
+            
+    except Exception as e:
+        print(f"❌ Error al procesar: {e}")
 
 if __name__ == "__main__":
-    # ¡PRUEBA FINAL! Solo pon el link, la API hará el resto
-    link = "https://es.aliexpress.com/item/1005010050151907.html"
-    publicar_automaticamente(link)
+    # Link de prueba
+    test_link = "https://es.aliexpress.com/item/1005010050151907.html"
+    publicar_oferta(test_link)

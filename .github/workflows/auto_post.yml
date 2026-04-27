@@ -1,0 +1,29 @@
+name: Automatización RadarPromo-MX
+
+on:
+  schedule:
+    - cron: '0 */1 * * *' # Se ejecuta cada hora automáticamente
+  workflow_dispatch: # Botón para ejecutar manualmente
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Instalar dependencias
+        run: |
+          pip install pyTelegramBotAPI python-dotenv requests
+
+      - name: Ejecutar Bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          ALI_APP_KEY: ${{ secrets.ALI_APP_KEY }}
+          ALI_APP_SECRET: ${{ secrets.ALI_APP_SECRET }}
+        run: python bot.py
