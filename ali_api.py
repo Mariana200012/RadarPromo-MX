@@ -8,8 +8,7 @@ APP_KEY = os.getenv("ALI_APP_KEY")
 APP_SECRET = os.getenv("ALI_APP_SECRET")
 
 def obtener_detalles_producto(product_id):
-    # Endpoint oficial
-    url = "https://gw.api.alibaba.com/openapi/param2/2/portals.open/api.getPromotionProductDetail/" + str(APP_KEY)
+    url = f"https://gw.api.alibaba.com/openapi/param2/2/portals.open/api.getPromotionProductDetail/{APP_KEY}"
     
     params = {
         "fields": "productTitle,salePrice,imageUrl,originalPrice",
@@ -20,8 +19,9 @@ def obtener_detalles_producto(product_id):
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
         
-        # Log para depuración en GitHub Actions
         print(f"DEBUG API Status: {response.status_code}")
+        # ESTO NOS DIRÁ EL ERROR REAL:
+        print(f"RESPUESTA COMPLETA: {data}")
         
         if "result" in data and data["result"]["products"]:
             prod = data["result"]["products"][0]
@@ -32,6 +32,6 @@ def obtener_detalles_producto(product_id):
                 "foto": prod["imageUrl"]
             }
     except Exception as e:
-        print(f"❌ Error técnico en ali_api: {e}")
+        print(f"❌ Error técnico: {e}")
     
     return None

@@ -40,6 +40,6 @@ def publicar_oferta(url_aliexpress):
         print(f"❌ Error al procesar: {e}")
 
 if __name__ == "__main__":
-    # Link de prueba
-    test_link = "https://es.aliexpress.com/item/1005010050151907.html"
+    # Este es un ID real de un producto activo (funda de celular)
+    test_link = "https://es.aliexpress.com/item/1005006061320399.html"
     publicar_oferta(test_link)
