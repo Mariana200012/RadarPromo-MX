@@ -2,7 +2,7 @@ name: Automatización RadarPromo-MX
 
 on:
   schedule:
-    - cron: '0 */1 * * *' # Se ejecuta cada hora automáticamente
+    - cron: '0 */2 * * *' # Se ejecuta cada hora automáticamente
   workflow_dispatch: # Botón para ejecutar manualmente
 
 jobs:
