@@ -2,12 +2,13 @@ import os
 import re
 import sqlite3
 import asyncio
+import requests
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.functions.messages import GetHistoryRequest
 from dotenv import load_dotenv
 
-# 1. CONFIGURACIÓN
+# 1. CONFIGURACIÓN E INICIALIZACIÓN
 load_dotenv()
 API_ID = int(os.getenv("TELEGRAM_API_ID"))
 API_HASH = os.getenv("TELEGRAM_API_HASH")
@@ -40,12 +41,27 @@ def registrar_db(source_id):
     except: pass
     conn.close()
 
-# 3. LÓGICA DE PROCESAMIENTO
+def obtener_foto_amazon(asin):
+    try:
+        url = f"https://www.amazon.com.mx/dp/{asin}"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+        response = requests.get(url, headers=headers, timeout=10)
+        img_url = re.search(r'"large":"(https://m\.media-amazon\.com/images/I/[^"]+?\.jpg)"', response.text)
+        if img_url:
+            img_data = requests.get(img_url.group(1)).content
+            path = f"temp_{asin}.jpg"
+            with open(path, 'wb') as f:
+                f.write(img_data)
+            return path
+    except:
+        return None
+    return None
+
 async def procesar_canales():
     client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
     await client.start()
     
-    print("🛰️ RadarPromoMX: Buscando nuevas gangas...")
+    print("🛰️ RadarPromoMX: Buscando ofertas con sistema de imagen reforzado...")
     ofertas_a_publicar = []
 
     for canal_user in CANALES_A_MONITOREAR:
@@ -55,10 +71,7 @@ async def procesar_canales():
                 max_id=0, min_id=0, add_offset=0, hash=0
             ))
             
-            contador = 0
             for msg in history.messages:
-                if contador >= 5: break # Subimos a 5 por canal
-                
                 if msg.message:
                     urls = re.findall(r'(https?://[^\s]+)', msg.message)
                     if urls:
@@ -66,72 +79,77 @@ async def procesar_canales():
                         if match:
                             asin = match.group(1)
                             if not ya_publicado(asin):
-                                # Extraer precios
                                 precios = re.findall(r'\$\s?[\d,.]+', msg.message)
                                 p_ahora = precios[0] if len(precios) >= 1 else "Ver en tienda"
                                 p_antes = precios[1] if len(precios) >= 2 else None
                                 
-                                foto = None
+                                dto_match = re.search(r'(-?\d{1,2}%)', msg.message)
+                                descuento = dto_match.group(1) if dto_match else None
+                                
+                                # Intentamos descargar la foto del mensaje directamente
+                                foto_path = None
                                 if msg.media:
-                                    foto = await msg.download_media()
+                                    foto_path = await client.download_media(msg, file=f"temp_{asin}.jpg")
                                 elif msg.web_preview and msg.web_preview.photo:
-                                    foto = await client.download_media(msg.web_preview.photo)
+                                    foto_path = await client.download_media(msg.web_preview.photo, file=f"temp_{asin}.jpg")
+                                
+                                # Si Telegram falló, vamos a Amazon
+                                if not foto_path:
+                                    foto_path = obtener_foto_amazon(asin)
                                 
                                 ofertas_a_publicar.append({
                                     'asin': asin,
                                     'url': f"https://www.amazon.com.mx/dp/{asin}?tag={AMAZON_TAG}",
-                                    'texto': msg.message,
+                                    'texto_completo': msg.message,
                                     'p_ahora': p_ahora,
                                     'p_antes': p_antes,
-                                    'foto': foto
+                                    'descuento': descuento,
+                                    'foto': foto_path
                                 })
-                                contador += 1
         except Exception as e:
-            print(f"⚠️ Error en {canal_user}: {e}")
+            print(f"⚠️ Error en canal: {e}")
 
-    # 4. DISEÑO FINAL (MEJORADO SEGÚN image_8310bc.png)
     for i, oferta in enumerate(ofertas_a_publicar):
         try:
-            # Limpieza selectiva: solo quitamos links y hashtags, dejamos el texto intacto
-            t = re.sub(r'https?://[^\s]+', '', oferta['texto'])
-            t = re.sub(r'#\S+', '', t)
-            # Quitamos frases específicas de otros grupos si aparecen
-            t = re.sub(r'(?i)unete a nuestros otros grupos.*', '', t)
-            t = re.sub(r'(?i)ver oferta.*', '', t)
-            t = t.replace('👉', '').replace('🔥', '').strip()
+            lineas = oferta['texto_completo'].split('\n')
+            lineas_limpias = []
+            for linea in lineas:
+                pattern_basura = r'(?i)(https?://|precio|oferta|descuento|\$|-?\d{1,2}%|unete|ver|#)'
+                if re.search(pattern_basura, linea): continue
+                if linea.strip(): lineas_limpias.append(linea.strip())
             
-            # Formato de precio
-            txt_precio = f"✅ <b>Precio: {oferta['p_ahora']}</b>"
-            if oferta['p_antes']:
-                txt_precio = f"❌ Antes: <del>{oferta['p_antes']}</del>\n{txt_precio}"
+            descripcion = " ".join(lineas_limpias[:2])
+            
+            txt_precio = ""
+            if oferta['descuento']: txt_precio += f"📉 <b>Descuento: {oferta['descuento']}</b>\n"
+            if oferta['p_antes']: txt_precio += f"❌ Antes: <del>{oferta['p_antes']}</del>\n"
+            txt_precio += f"✅ <b>Precio Hoy: {oferta['p_ahora']}</b>"
 
             mensaje = (
                 f"🔥 <b>¡OFERTA FLASH!</b> 🔥\n\n"
-                f"📦 {t[:300]}...\n\n"
+                f"📦 <b>{descripcion}</b>\n\n"
                 f"{txt_precio}\n\n"
                 f"🛒 <b>COMPRA AQUÍ:</b>\n"
                 f"👉 {oferta['url']}\n\n"
                 f"🕵️ @RadarPromoMX"
             )
             
-            if oferta['foto']:
+            # ENVÍO CON VERIFICACIÓN DE ARCHIVO
+            if oferta['foto'] and os.path.exists(oferta['foto']):
                 await client.send_file(ID_MI_CANAL, oferta['foto'], caption=mensaje, parse_mode='html')
-                if os.path.exists(oferta['foto']): os.remove(oferta['foto'])
+                os.remove(oferta['foto']) # Limpiamos después de enviar
+                print(f"✅ Publicada con éxito (con foto): {oferta['asin']}")
             else:
                 await client.send_message(ID_MI_CANAL, mensaje, parse_mode='html')
+                print(f"✅ Publicada con éxito (solo texto): {oferta['asin']}")
             
             registrar_db(oferta['asin'])
-            print(f"✅ Publicada: {oferta['asin']}")
-            
+            if i < len(ofertas_a_publicar) - 1: await asyncio.sleep(300)
+                
         except Exception as e:
-            print(f"❌ Error al enviar: {e}")
-
-        if i < len(ofertas_a_publicar) - 1:
-            print("⏳ Esperando 5 minutos para evitar spam...")
-            await asyncio.sleep(300) 
+            print(f"❌ Error crítico: {e}")
 
     await client.disconnect()
-    print("🏁 Ráfaga terminada. El bot se cierra hasta la siguiente hora.")
 
 if __name__ == "__main__":
     inicializar_db()
