@@ -144,7 +144,7 @@ async def procesar_canales():
                 print(f"✅ Publicada con éxito (solo texto): {oferta['asin']}")
             
             registrar_db(oferta['asin'])
-            if i < len(ofertas_a_publicar) - 1: await asyncio.sleep(300)
+            if i < len(ofertas_a_publicar) - 1: await asyncio.sleep(120)
                 
         except Exception as e:
             print(f"❌ Error crítico: {e}")
