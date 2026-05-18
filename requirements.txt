@@ -6,4 +6,3 @@ feedparser
 dotenv
 telethon
 python-dotenv
-requests
