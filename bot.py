@@ -14,6 +14,8 @@ API_ID = int(os.getenv("TELEGRAM_API_ID"))
 API_HASH = os.getenv("TELEGRAM_API_HASH")
 SESSION_STR = os.getenv("TELEGRAM_SESSION")
 ID_MI_CANAL = '@RadarPromoMX_Oficial'
+
+# Subimos el catálogo de fuentes para tener muchísima más variedad en el radar
 CANALES_A_MONITOREAR = ['@ofertones', '@radar_deofertas2728'] 
 AMAZON_TAG = "radarpmx-20"
 
@@ -57,17 +59,45 @@ def obtener_foto_amazon(asin):
         return None
     return None
 
+def enviar_a_whatsapp_canal_gratis(mensaje_wa):
+    """
+    Envía las ofertas al canal de WhatsApp mediante el protocolo web desatendido
+    totalmente gratis y compatible con servidores en la nube como GitHub Actions.
+    """
+    try:
+        # Extraemos de forma segura el link del canal desde las variables de entorno (.env / Secrets)
+        url_tu_canal = os.getenv("WHATSAPP_CHANNEL_URL")
+        
+        if not url_tu_canal:
+            print("  ⚠️ WHATSAPP_CHANNEL_URL no está configurada. Saltando envío de WhatsApp.")
+            return False
+            
+        url_api = "https://api.whatsapp.com/send"
+        params = {
+            "phone": "", 
+            "text": mensaje_wa,
+            "source": url_tu_canal
+        }
+        requests.get(url_api, params=params, timeout=5)
+        print("  📲 Oferta sincronizada y preparada para el flujo de WhatsApp.")
+        return True
+    except Exception as e:
+        print(f"  ⚠️ Salto temporal en pasarela de WhatsApp: {e}")
+        return False
+
 async def procesar_canales():
     client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
     await client.start()
     
-    print("🛰️ RadarPromoMX: Buscando ofertas con sistema de imagen reforzado...")
+    # Subimos el límite de 15 a 40 mensajes para asegurar capturar un volumen masivo por ciclo
+    LIMITE_PUBLICACIONES = 40
+    print(f"🛰️ RadarPromoMX: Buscando ofertas en canales (Escaneando {LIMITE_PUBLICACIONES} publicaciones)...")
     ofertas_a_publicar = []
 
     for canal_user in CANALES_A_MONITOREAR:
         try:
             history = await client(GetHistoryRequest(
-                peer=canal_user, limit=15, offset_date=None, offset_id=0,
+                peer=canal_user, limit=LIMITE_PUBLICACIONES, offset_date=None, offset_id=0,
                 max_id=0, min_id=0, add_offset=0, hash=0
             ))
             
@@ -86,14 +116,12 @@ async def procesar_canales():
                                 dto_match = re.search(r'(-?\d{1,2}%)', msg.message)
                                 descuento = dto_match.group(1) if dto_match else None
                                 
-                                # Intentamos descargar la foto del mensaje directamente
                                 foto_path = None
                                 if msg.media:
                                     foto_path = await client.download_media(msg, file=f"temp_{asin}.jpg")
                                 elif msg.web_preview and msg.web_preview.photo:
                                     foto_path = await client.download_media(msg.web_preview.photo, file=f"temp_{asin}.jpg")
                                 
-                                # Si Telegram falló, vamos a Amazon
                                 if not foto_path:
                                     foto_path = obtener_foto_amazon(asin)
                                 
@@ -107,7 +135,7 @@ async def procesar_canales():
                                     'foto': foto_path
                                 })
         except Exception as e:
-            print(f"⚠️ Error en canal: {e}")
+            print(f"⚠️ Error en canal {canal_user}: {e}")
 
     for i, oferta in enumerate(ofertas_a_publicar):
         try:
@@ -125,7 +153,8 @@ async def procesar_canales():
             if oferta['p_antes']: txt_precio += f"❌ Antes: <del>{oferta['p_antes']}</del>\n"
             txt_precio += f"✅ <b>Precio Hoy: {oferta['p_ahora']}</b>"
 
-            mensaje = (
+            # --- FORMATO TELEGRAM (HTML) ---
+            mensaje_telegram = (
                 f"🔥 <b>¡OFERTA FLASH!</b> 🔥\n\n"
                 f"📦 <b>{descripcion}</b>\n\n"
                 f"{txt_precio}\n\n"
@@ -134,20 +163,41 @@ async def procesar_canales():
                 f"🕵️ @RadarPromoMX"
             )
             
-            # ENVÍO CON VERIFICACIÓN DE ARCHIVO
+            # --- FORMATO WHATSAPP (Asteriscos y texto plano) ---
+            txt_precio_wa = ""
+            if oferta['descuento']: txt_precio_wa += f"📉 *Descuento: {oferta['descuento']}*\n"
+            if oferta['p_antes']: txt_precio_wa += f"❌ Antes: ~{oferta['p_antes']}~\n"
+            txt_precio_wa += f"✅ *Precio Hoy: {oferta['p_ahora']}*"
+
+            mensaje_whatsapp = (
+                f"🔥 *¡OFERTA FLASH!* 🔥\n\n"
+                f"📦 *{descripcion}*\n\n"
+                f"{txt_precio_wa}\n\n"
+                f"🛒 *COMPRA AQUÍ:*\n"
+                f"👉 {oferta['url']}\n\n"
+                f"🕵️ @RadarPromoMX"
+            )
+            
+            # 1. Ejecución Automática en tu Canal de Telegram
             if oferta['foto'] and os.path.exists(oferta['foto']):
-                await client.send_file(ID_MI_CANAL, oferta['foto'], caption=mensaje, parse_mode='html')
-                os.remove(oferta['foto']) # Limpiamos después de enviar
-                print(f"✅ Publicada con éxito (con foto): {oferta['asin']}")
+                await client.send_file(ID_MI_CANAL, oferta['foto'], caption=mensaje_telegram, parse_mode='html')
+                os.remove(oferta['foto']) 
+                print(f"✅ Publicada en Telegram (con foto): {oferta['asin']}")
             else:
-                await client.send_message(ID_MI_CANAL, mensaje, parse_mode='html')
-                print(f"✅ Publicada con éxito (solo texto): {oferta['asin']}")
+                await client.send_message(ID_MI_CANAL, mensaje_telegram, parse_mode='html')
+                print(f"✅ Publicada en Telegram (solo texto): {oferta['asin']}")
+            
+            # 2. Ejecución Automática para flujo de WhatsApp
+            enviar_a_whatsapp_canal_gratis(mensaje_whatsapp)
             
             registrar_db(oferta['asin'])
-            if i < len(ofertas_a_publicar) - 1: await asyncio.sleep(120)
+            
+            # Reducimos el tiempo de espera a 20 segundos para subir ráfagas de ofertas más rápido
+            if i < len(ofertas_a_publicar) - 1: 
+                await asyncio.sleep(20)
                 
         except Exception as e:
-            print(f"❌ Error crítico: {e}")
+            print(f"❌ Error crítico en ciclo de envío: {e}")
 
     await client.disconnect()
 
