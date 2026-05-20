@@ -38,7 +38,8 @@ def registrar_db(source_id):
     try:
         cursor.execute("INSERT INTO ofertas_publicadas (source_id) VALUES (?)", (source_id,))
         conn.commit()
-    except: pass
+    except: 
+        pass
     conn.close()
 
 def obtener_foto_amazon(asin):
@@ -166,8 +167,10 @@ async def procesar_canales():
             
             # --- CONSTRUCCIÓN DE PLANTILLAS ---
             txt_precio = ""
-            if oferta['descuento']: txt_precio += f"📉 <b>Descuento: {oferta['descuento']}</b>\n"
-            if oferta['p_antes']: txt_precio += f"❌ Antes: <del>{oferta['p_antes']}</del>\n"
+            if oferta['descuento']: 
+                txt_precio += f"📉 <b>Descuento: {oferta['descuento']}</b>\n"
+            if oferta['p_antes']: 
+                txt_precio += f"❌ Antes: <del>{oferta['p_antes']}</del>\n"
             txt_precio += f"✅ <b>Precio Hoy: {oferta['p_ahora']}</b>"
 
             mensaje_telegram = (
@@ -180,8 +183,10 @@ async def procesar_canales():
             )
             
             txt_precio_wa = ""
-            if oferta['descuento']: txt_precio_wa += f"📉 *Descuento: {oferta['descuento']}*\n"
-            if oferta['p_antes']: txt_precio_wa += f"❌ Antes: ~{oferta['p_antes']}~\n"
+            if oferta['descuento']: 
+                txt_precio_wa += f"📉 *Descuento: {oferta['descuento']}*\n"
+            if oferta['p_antes']: 
+                txt_precio_wa += f"❌ Antes: ~{oferta['p_antes']}~\n"
             txt_precio_wa += f"✅ *Precio Hoy: {oferta['p_ahora']}*"
 
             mensaje_whatsapp = (
