@@ -14,8 +14,6 @@ API_ID = int(os.getenv("TELEGRAM_API_ID"))
 API_HASH = os.getenv("TELEGRAM_API_HASH")
 SESSION_STR = os.getenv("TELEGRAM_SESSION")
 ID_MI_CANAL = '@RadarPromoMX_Oficial'
-
-# Subimos el catálogo de fuentes para tener muchísima más variedad en el radar
 CANALES_A_MONITOREAR = ['@ofertones', '@radar_deofertas2728'] 
 AMAZON_TAG = "radarpmx-20"
 
@@ -61,43 +59,51 @@ def obtener_foto_amazon(asin):
 
 def enviar_a_whatsapp_canal_gratis(mensaje_wa):
     """
-    Envía las ofertas al canal de WhatsApp mediante el protocolo web desatendido
-    totalmente gratis y compatible con servidores en la nube como GitHub Actions.
+    Envía las ofertas al canal de WhatsApp usando el puente de Green API.
     """
     try:
-        # Extraemos de forma segura el link del canal desde las variables de entorno (.env / Secrets)
-        url_tu_canal = os.getenv("WHATSAPP_CHANNEL_URL")
+        instance_id = os.getenv("GREEN_API_INSTANCE")
+        api_token = os.getenv("GREEN_API_TOKEN")
+        url_canal = os.getenv("WHATSAPP_CHANNEL_URL")
         
-        if not url_tu_canal:
-            print("  ⚠️ WHATSAPP_CHANNEL_URL no está configurada. Saltando envío de WhatsApp.")
+        if not instance_id or not api_token or not url_canal:
+            print(f"  ❌ WHATSAPP ERROR: Credenciales ausentes en la nube. (Instance: {instance_id is not None}, Token: {api_token is not None}, URL: {url_canal is not None})")
             return False
             
-        url_api = "https://api.whatsapp.com/send"
-        params = {
-            "phone": "", 
-            "text": mensaje_wa,
-            "source": url_tu_canal
+        channel_pure_id = url_canal.split('/')[-1]
+        chat_id = f"{channel_pure_id}@newsletter" 
+        
+        url = f"https://api.green-api.com/waInstance{instance_id}/sendMessage/{api_token}"
+        
+        payload = {
+            "chatId": chat_id,
+            "message": mensaje_wa
         }
-        requests.get(url_api, params=params, timeout=5)
-        print("  📲 Oferta sincronizada y preparada para el flujo de WhatsApp.")
-        return True
+        
+        headers = {'Content-Type': 'application/json'}
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            print(f"  ✅ GREEN_API: ¡Oferta enviada con éxito al Canal de WhatsApp!")
+            return True
+        else:
+            print(f"  ❌ GREEN_API ERROR: Servidor rechazó el mensaje. Código: {response.status_code}, Detalle: {response.text}")
+            return False
     except Exception as e:
-        print(f"  ⚠️ Salto temporal en pasarela de WhatsApp: {e}")
+        print(f"  ⚠️ GREEN_API EXCEPTION: Fallo de red crítico: {e}")
         return False
 
 async def procesar_canales():
     client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
     await client.start()
     
-    # Subimos el límite de 15 a 40 mensajes para asegurar capturar un volumen masivo por ciclo
-    LIMITE_PUBLICACIONES = 40
-    print(f"🛰️ RadarPromoMX: Buscando ofertas en canales (Escaneando {LIMITE_PUBLICACIONES} publicaciones)...")
+    print("🛰️ RadarPromoMX: Buscando ofertas en canales (Escaneando 40 publicaciones)...")
     ofertas_a_publicar = []
 
     for canal_user in CANALES_A_MONITOREAR:
         try:
             history = await client(GetHistoryRequest(
-                peer=canal_user, limit=LIMITE_PUBLICACIONES, offset_date=None, offset_id=0,
+                peer=canal_user, limit=40, offset_date=None, offset_id=0,
                 max_id=0, min_id=0, add_offset=0, hash=0
             ))
             
@@ -135,25 +141,39 @@ async def procesar_canales():
                                     'foto': foto_path
                                 })
         except Exception as e:
-            print(f"⚠️ Error en canal {canal_user}: {e}")
+            print(f"⚠️ Error en canal: {e}")
 
     for i, oferta in enumerate(ofertas_a_publicar):
         try:
+            # --- LIMPIEZA DE TEXTO Y CUPONES BANCARIOS ---
             lineas = oferta['texto_completo'].split('\n')
             lineas_limpias = []
             for linea in lineas:
+                # 1. Filtramos líneas completas de enlaces, precios o hashtags
                 pattern_basura = r'(?i)(https?://|precio|oferta|descuento|\$|-?\d{1,2}%|unete|ver|#)'
-                if re.search(pattern_basura, linea): continue
-                if linea.strip(): lineas_limpias.append(linea.strip())
+                if re.search(pattern_basura, linea): 
+                    continue
+                
+                # 2. Eliminamos cupones o menciones a bancos dentro de la línea
+                linea_filtrada = re.sub(r'(?i)(bbva|banorte|hsbc|citibanamex|banamex|santander|amex|coppel|mercadopago)\s*:\s*\w+', '', linea)
+                linea_filtrada = re.sub(r'(?i)\b(bbva|banorte|hsbc|citibanamex|banamex|santander|amex)\b', '', linea_filtrada)
+                
+                # Limpiamos emojis sueltos de confirmación que acompañan los cupones bancarios
+                linea_filtrada = linea_filtrada.replace('✅', '').replace('🔥', '').strip()
+                
+                if linea_filtrada: 
+                    lineas_limpias.append(linea_filtrada)
             
+            # Tomamos las dos primeras líneas resultantes para armar la descripción corta
             descripcion = " ".join(lineas_limpias[:2])
+            descripcion = re.sub(r'^(?i)amazon\s*:\s*', '', descripcion)
             
+            # --- CONSTRUCCIÓN DE PLANTILLA DE TEXTOS ---
             txt_precio = ""
             if oferta['descuento']: txt_precio += f"📉 <b>Descuento: {oferta['descuento']}</b>\n"
             if oferta['p_antes']: txt_precio += f"❌ Antes: <del>{oferta['p_antes']}</del>\n"
             txt_precio += f"✅ <b>Precio Hoy: {oferta['p_ahora']}</b>"
 
-            # --- FORMATO TELEGRAM (HTML) ---
             mensaje_telegram = (
                 f"🔥 <b>¡OFERTA FLASH!</b> 🔥\n\n"
                 f"📦 <b>{descripcion}</b>\n\n"
@@ -163,7 +183,6 @@ async def procesar_canales():
                 f"🕵️ @RadarPromoMX"
             )
             
-            # --- FORMATO WHATSAPP (Asteriscos y texto plano) ---
             txt_precio_wa = ""
             if oferta['descuento']: txt_precio_wa += f"📉 *Descuento: {oferta['descuento']}*\n"
             if oferta['p_antes']: txt_precio_wa += f"❌ Antes: ~{oferta['p_antes']}~\n"
@@ -178,7 +197,7 @@ async def procesar_canales():
                 f"🕵️ @RadarPromoMX"
             )
             
-            # 1. Ejecución Automática en tu Canal de Telegram
+            # --- ENVÍO A TELEGRAM ---
             if oferta['foto'] and os.path.exists(oferta['foto']):
                 await client.send_file(ID_MI_CANAL, oferta['foto'], caption=mensaje_telegram, parse_mode='html')
                 os.remove(oferta['foto']) 
@@ -187,17 +206,17 @@ async def procesar_canales():
                 await client.send_message(ID_MI_CANAL, mensaje_telegram, parse_mode='html')
                 print(f"✅ Publicada en Telegram (solo texto): {oferta['asin']}")
             
-            # 2. Ejecución Automática para flujo de WhatsApp
+            # --- ENVÍO A WHATSAPP (GREEN API) ---
             enviar_a_whatsapp_canal_gratis(mensaje_whatsapp)
             
             registrar_db(oferta['asin'])
             
-            # Reducimos el tiempo de espera a 20 segundos para subir ráfagas de ofertas más rápido
+            # Espera prudencial de 20 segundos para regular ráfagas en la nube
             if i < len(ofertas_a_publicar) - 1: 
                 await asyncio.sleep(20)
                 
         except Exception as e:
-            print(f"❌ Error crítico en ciclo de envío: {e}")
+            print(f"❌ Error crítico en iteración: {e}")
 
     await client.disconnect()
 
