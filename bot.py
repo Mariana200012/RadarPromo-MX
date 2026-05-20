@@ -63,29 +63,24 @@ def enviar_a_whatsapp_canal_gratis(mensaje_wa):
     Mantiene el flujo 100% automatizado desde la nube.
     """
     try:
-        # Reutilizamos las variables existentes en tus Secrets para no alterar el YAML
-        phone = os.getenv("GREEN_API_INSTANCE")   # Tu número de celular internacional (ej: 521...)
-        api_key = os.getenv("GREEN_API_TOKEN")    # Tu API Key de 6 dígitos de CallMeBot
+        phone = os.getenv("GREEN_API_INSTANCE")   
+        api_key = os.getenv("GREEN_API_TOKEN")    
         url_canal = os.getenv("WHATSAPP_CHANNEL_URL")
         
         if not phone or not api_key or not url_canal:
             print("  ❌ WHATSAPP ERROR: Credenciales de CallMeBot ausentes en la nube.")
             return False
             
-        # Extraemos el hash único del canal (lo que va después de /channel/)
         channel_pure_id = url_canal.split('/')[-1]
-        
-        # Endpoint oficial de CallMeBot para Canales/Newsletters
         url = "https://api.callmebot.com/whatsapp.php"
         
         params = {
-            "phone": phone,            # Tu celular registrado en la API
-            "text": mensaje_wa,         # El mensaje formateado
-            "apikey": api_key,         # La llave que te dio el bot
-            "channel": channel_pure_id  # El identificador de tu canal destino
+            "phone": phone,            
+            "text": mensaje_wa,         
+            "apikey": api_key,         
+            "channel": channel_pure_id  
         }
         
-        # Petición HTTP GET nativa de CallMeBot
         response = requests.get(url, params=params, timeout=10)
         
         if response.status_code == 200:
@@ -155,24 +150,71 @@ async def procesar_canales():
             lineas = oferta['texto_completo'].split('\n')
             lineas_limpias = []
             for linea in lineas:
-                # 1. Filtramos líneas completas basura de enlaces, precios o hashtags de siempre
                 pattern_basura = r'(?i)(https?://|precio|oferta|descuento|\$|-?\d{1,2}%|unete|ver|#)'
                 if re.search(pattern_basura, linea): 
                     continue
                 
-                # 2. Pulido de cupones bancarios para mantener la estética limpia
                 linea_filtrada = re.sub(r'(?i)(bbva|banorte|hsbc|citibanamex|banamex|santander|amex|coppel|mercadopago)\s*:\s*\w+', '', linea)
                 linea_filtrada = re.sub(r'(?i)\b(bbva|banorte|hsbc|citibanamex|banamex|santander|amex)\b', '', linea_filtrada)
-                
-                # Limpiamos remanentes de emojis que se usan en las promociones bancarias
                 linea_filtrada = linea_filtrada.replace('✅', '').replace('🔥', '').strip()
                 
                 if linea_filtrada: 
                     lineas_limpias.append(linea_filtrada)
             
             descripcion = " ".join(lineas_limpias[:2])
-            
-            # Bandera (?i) corregida al inicio para evitar el DeprecationWarning de Python
             descripcion = re.sub(r'(?i)^amazon\s*:\s*', '', descripcion)
             
-            # --- CONSTRUCCIÓN DE PLANTILLAS
+            # --- CONSTRUCCIÓN DE PLANTILLAS ---
+            txt_precio = ""
+            if oferta['descuento']: txt_precio += f"📉 <b>Descuento: {oferta['descuento']}</b>\n"
+            if oferta['p_antes']: txt_precio += f"❌ Antes: <del>{oferta['p_antes']}</del>\n"
+            txt_precio += f"✅ <b>Precio Hoy: {oferta['p_ahora']}</b>"
+
+            mensaje_telegram = (
+                f"🔥 <b>¡OFERTA FLASH!</b> 🔥\n\n"
+                f"📦 <b>{descripcion}</b>\n\n"
+                f"{txt_precio}\n\n"
+                f"🛒 <b>COMPRA AQUÍ:</b>\n"
+                f"👉 {oferta['url']}\n\n"
+                f"🕵️ @RadarPromoMX"
+            )
+            
+            txt_precio_wa = ""
+            if oferta['descuento']: txt_precio_wa += f"📉 *Descuento: {oferta['descuento']}*\n"
+            if oferta['p_antes']: txt_precio_wa += f"❌ Antes: ~{oferta['p_antes']}~\n"
+            txt_precio_wa += f"✅ *Precio Hoy: {oferta['p_ahora']}*"
+
+            mensaje_whatsapp = (
+                f"🔥 *¡OFERTA FLASH!* 🔥\n\n"
+                f"📦 *{descripcion}*\n\n"
+                f"{txt_precio_wa}\n\n"
+                f"🛒 *COMPRA AQUÍ:*\n"
+                f"👉 {oferta['url']}\n\n"
+                f"🕵️ @RadarPromoMX"
+            )
+            
+            # --- ENVÍO A TELEGRAM ---
+            if oferta['foto'] and os.path.exists(oferta['foto']):
+                await client.send_file(ID_MI_CANAL, oferta['foto'], caption=mensaje_telegram, parse_mode='html')
+                os.remove(oferta['foto']) 
+                print(f"✅ Publicada en Telegram (con foto): {oferta['asin']}")
+            else:
+                await client.send_message(ID_MI_CANAL, mensaje_telegram, parse_mode='html')
+                print(f"✅ Publicada en Telegram (solo texto): {oferta['asin']}")
+            
+            # --- ENVÍO A WHATSAPP (CALLMEBOT) ---
+            enviar_a_whatsapp_canal_gratis(mensaje_whatsapp)
+            
+            registrar_db(oferta['asin'])
+            
+            if i < len(ofertas_a_publicar) - 1: 
+                await asyncio.sleep(20)
+                
+        except Exception as e:
+            print(f"❌ Error crítico en iteración: {e}")
+
+    await client.disconnect()
+
+if __name__ == "__main__":
+    inicializar_db()
+    asyncio.run(procesar_canales())
