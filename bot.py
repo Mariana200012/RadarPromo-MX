@@ -58,41 +58,40 @@ def obtener_foto_amazon(asin):
         return None
     return None
 
-def enviar_a_whatsapp_canal_gratis(mensaje_wa):
+def enviar_a_whatsapp_grupo(mensaje_wa, foto_path):
     """
-    Envía las ofertas al canal de WhatsApp usando la pasarela gratuita de CallMeBot.
-    Mantiene el flujo 100% automatizado desde la nube.
+    Envía las ofertas al Grupo de WhatsApp usando Green API.
+    Soporta envío nativo de imágenes.
     """
     try:
-        phone = os.getenv("GREEN_API_INSTANCE")   
-        api_key = os.getenv("GREEN_API_TOKEN")    
-        url_canal = os.getenv("WHATSAPP_CHANNEL_URL")
+        instance_id = os.getenv("GREEN_API_INSTANCE")
+        api_token = os.getenv("GREEN_API_TOKEN")
+        chat_id = os.getenv("WHATSAPP_CHANNEL_URL") 
         
-        if not phone or not api_key or not url_canal:
-            print("  ❌ WHATSAPP ERROR: Credenciales de CallMeBot ausentes en la nube.")
+        if not instance_id or not api_token or not chat_id:
+            print("  ❌ GREEN API ERROR: Credenciales ausentes en la nube.")
             return False
-            
-        channel_pure_id = url_canal.split('/')[-1]
-        url = "https://api.callmebot.com/whatsapp.php"
-        
-        params = {
-            "phone": phone,            
-            "text": mensaje_wa,         
-            "apikey": api_key,         
-            "channel": channel_pure_id  
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        
+
+        if foto_path and os.path.exists(foto_path):
+            url = f"https://api.green-api.com/waInstance{instance_id}/sendFileByUpload/{api_token}"
+            payload = {'chatId': chat_id, 'caption': mensaje_wa}
+            files = {'file': open(foto_path, 'rb')}
+            response = requests.post(url, data=payload, files=files, timeout=15)
+        else:
+            url = f"https://api.green-api.com/waInstance{instance_id}/sendMessage/{api_token}"
+            payload = {"chatId": chat_id, "message": mensaje_wa, "linkPreview": True}
+            headers = {'Content-Type': 'application/json'}
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
+
         if response.status_code == 200:
-            print("  ✅ CALLMEBOT: ¡Oferta enviada con éxito al Canal de WhatsApp!")
+            print("  ✅ GREEN API: ¡Oferta enviada al Grupo de WhatsApp!")
             return True
         else:
-            print(f"  ❌ CALLMEBOT ERROR: Código {response.status_code}, Servidor dice: {response.text}")
+            print(f"  ❌ GREEN API ERROR: {response.text}")
             return False
             
     except Exception as e:
-        print(f"  ⚠️ Error en la pasarela de CallMeBot: {e}")
+        print(f"  ⚠️ Error en pasarela Green API: {e}")
         return False
 
 async def procesar_canales():
@@ -147,7 +146,6 @@ async def procesar_canales():
 
     for i, oferta in enumerate(ofertas_a_publicar):
         try:
-            # --- LIMPIEZA DE TEXTO Y CUPONES BANCARIOS ---
             lineas = oferta['texto_completo'].split('\n')
             lineas_limpias = []
             for linea in lineas:
@@ -165,7 +163,6 @@ async def procesar_canales():
             descripcion = " ".join(lineas_limpias[:2])
             descripcion = re.sub(r'(?i)^amazon\s*:\s*', '', descripcion)
             
-            # --- CONSTRUCCIÓN DE PLANTILLAS ---
             txt_precio = ""
             if oferta['descuento']: 
                 txt_precio += f"📉 <b>Descuento: {oferta['descuento']}</b>\n"
@@ -198,17 +195,17 @@ async def procesar_canales():
                 f"🕵️ @RadarPromoMX"
             )
             
-            # --- ENVÍO A TELEGRAM ---
             if oferta['foto'] and os.path.exists(oferta['foto']):
                 await client.send_file(ID_MI_CANAL, oferta['foto'], caption=mensaje_telegram, parse_mode='html')
-                os.remove(oferta['foto']) 
                 print(f"✅ Publicada en Telegram (con foto): {oferta['asin']}")
             else:
                 await client.send_message(ID_MI_CANAL, mensaje_telegram, parse_mode='html')
                 print(f"✅ Publicada en Telegram (solo texto): {oferta['asin']}")
             
-            # --- ENVÍO A WHATSAPP (CALLMEBOT) ---
-            enviar_a_whatsapp_canal_gratis(mensaje_whatsapp)
+            enviar_a_whatsapp_grupo(mensaje_whatsapp, oferta['foto'])
+            
+            if oferta['foto'] and os.path.exists(oferta['foto']):
+                os.remove(oferta['foto']) 
             
             registrar_db(oferta['asin'])
             
